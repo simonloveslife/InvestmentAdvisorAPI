@@ -59,9 +59,16 @@ class RiskAndExpView(APIView):
 
     def post(self, request):
         data = request.data
-        print(data)
+        # print(data)
         risk_data, exp_data, tier = {}, {}, -1
         # tier is borrow exp
+        if not (int(data['transactionNumEver']) >= int(data['transactionNum12']) >= int(
+                data['transactionNum6'])) or int(data['transactionNumEver']) < 0:
+            return Response({'transactionNum': 'invalid transaction number'}, status=status.HTTP_400_BAD_REQUEST)
+        if not (float(data['transactionPurchaseEver']) >= float(data['transactionPurchase12']) >= float(
+                data['transactionPurchase6'])):
+            return Response({'transactionPurchase': 'invalid transaction purchase'}, status=status.HTTP_400_BAD_REQUEST)
+
         exp_data['user_id'] = data['user_id']
         exp_data['transactionNumEver'] = data['transactionNumEver']
         exp_data['transactionNum12'] = data['transactionNum12']
@@ -70,24 +77,24 @@ class RiskAndExpView(APIView):
         exp_data['transactionPurchase12'] = data['transactionPurchase12']
         exp_data['transactionPurchase6'] = data['transactionPurchase6']
         tier = self.getTier(exp_data)
-
         exp_serializer = ExpModelSerializer(data=exp_data)
+
         if exp_serializer.is_valid():
             exp_serializer.save()
             if tier > 0:
                 risk_data['BorrowerExp'] = tier
             else:
-                return Response({'BorrowerExp': 'invalid BorrowerExp'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'BorrowerExp': 'invalid Borrower Experience'}, status=status.HTTP_400_BAD_REQUEST)
         else:
             return Response(exp_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         risk_data['user_id'] = data['user_id']
         risk_data['user_FICO'] = data['user_FICO']
         risk_data['LTV'] = data['LTV']
-        if float(risk_data['LTV']) < self.LTV_MIN or float(risk_data['LTV']) > 1:
-            return Response({'LTV': 'LTV is supposed to be larger than 0.57 less than 1.'},
-                            status=status.HTTP_400_BAD_REQUEST)
 
+        if float(risk_data['LTV']) > 1:
+            return Response({'LTV': 'LTV is supposed to be less than 100%.'},
+                            status=status.HTTP_400_BAD_REQUEST)
         if data['PersonalGuarantee'] == '1':
             risk_data['PersonalGuarantee'] = True
         else:
@@ -99,6 +106,7 @@ class RiskAndExpView(APIView):
         risk_serializer = RiskModelSerializer(data=risk_data)
         if risk_serializer.is_valid():
             risk_serializer.save()
+
             J = {}
             J['Coupon'] = risk_data['Coupon']
             J['Grade'] = risk_data['Grade']
@@ -120,15 +128,18 @@ class RiskAndExpView(APIView):
 
     def calCoupon(self, risk_data):
         FICO = int(risk_data['user_FICO'])
-        print('FICO', FICO)
+        # print('FICO', FICO)
         if FICO < 680:
             return 'Rej', -1.0
         LTV = float(risk_data['LTV'])
         personalGuarantee = risk_data['PersonalGuarantee']
         borrowerExp = int(risk_data['BorrowerExp'])
+        # grade = ''
         gradeMap = self.generateGradeToCouponMap()
-        grade = self.calGrade(LTV, borrowerExp)
-        print(len(gradeMap), gradeMap)
+        if LTV < 0.57:
+            grade = 'A1'
+        else:
+            grade = self.calGrade(LTV, borrowerExp)
         coupon = gradeMap[grade]
         if personalGuarantee == True:
             return grade, round(float(coupon), 3)
